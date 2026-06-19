@@ -1,3 +1,5 @@
+import { randomFillSync } from 'node:crypto';
+
 // ============================================================
 // Token Generator
 // Format: A001, A002 ... A999, B001 ...
@@ -31,8 +33,6 @@ export function generateAccessCode(): string {
     globalThis.crypto.getRandomValues(array);
   } else {
     // Node.js fallback (used in API routes during SSR)
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { randomFillSync } = require('crypto');
     randomFillSync(array);
   }
 
