@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-syne: 'Syne', sans-serif;
+  --font-dm-sans: 'DM Sans', sans-serif;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    font-family: var(--font-dm-sans), system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .font-syne {
+    font-family: var(--font-syne), sans-serif;
+  }
+  .font-dm {
+    font-family: var(--font-dm-sans), sans-serif;
+  }
+}
+
+/* Subtle bounce for CALLED notification */
+@keyframes bounce-slow {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-8px); }
+}
+
+.animate-bounce-slow {
+  animation: bounce-slow 1.2s ease-in-out infinite;
+}
