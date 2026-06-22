@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { getPublicClinicId } from '@/lib/clinic-id';
+import { debounce } from '@/lib/debounce';
 import { Patient, QueueStats, FamilyGroup } from '@/types';
 import MetricsBar from '@/components/reception/MetricsBar';
 import AddPatientForm from '@/components/reception/AddPatientForm';
@@ -9,11 +11,6 @@ import QueueTable from '@/components/reception/QueueTable';
 import QRModal from '@/components/shared/QRModal';
 
 export default function ReceptionPage() {
-  // ── Auth state ──────────────────────────────────────────────
-  const [authChecked, setAuthChecked] = useState(false);
-  const [authed, setAuthed]           = useState(false);
-
-  // ── Queue state ─────────────────────────────────────────────
   const [patients, setPatients]         = useState<Patient[]>([]);
   const [stats, setStats]               = useState<QueueStats | null>(null);
   const [familyGroups, setFamilyGroups] = useState<FamilyGroup[]>([]);
@@ -23,57 +20,66 @@ export default function ReceptionPage() {
   const [showQR, setShowQR]             = useState(false);
   const [callError, setCallError]       = useState('');
 
-  // ── Stable Supabase ref (fix: no dependency array churn) ────
   const supabaseRef = useRef(createClient());
+  const clinicId    = getPublicClinicId();
 
-  // ── Auth guard ──────────────────────────────────────────────
-  useEffect(() => {
-    const supabase = supabaseRef.current;
-    supabase.auth.getSession().then(({ data }) => {
-      const hasSession = !!data.session;
-      setAuthed(hasSession);
-      setAuthChecked(true);
-      if (!hasSession) {
-        window.location.href = '/login';
-      }
-    });
-  }, []); // runs once on mount
-
-  // ── Data fetching ────────────────────────────────────────────
-  const fetchData = useCallback(async () => {
+  const fetchQueueData = useCallback(async () => {
     try {
-      const [patientsRes, statsRes, groupsRes] = await Promise.all([
-        fetch('/api/patients').then((r) => r.json()),
-        fetch('/api/stats').then((r) => r.json()),
-        fetch('/api/family-groups').then((r) => r.json()),
-      ]);
-      setPatients(patientsRes.patients ?? []);
-      setStats(statsRes);
-      setFamilyGroups(groupsRes.groups ?? []);
+      const res = await fetch('/api/reception/snapshot');
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if (!res.ok) return;
+      const data = await res.json();
+      setPatients(data.patients ?? []);
+      setStats(data.stats ?? null);
     } catch (err) {
-      console.error('[ReceptionPage] fetchData:', err);
+      console.error('[ReceptionPage] fetchQueueData:', err);
     } finally {
       setIsLoading(false);
     }
-  }, []); // no supabase dep — fetchData uses fetch(), not supabase directly
+  }, []);
 
-  // ── Realtime subscriptions ───────────────────────────────────
+  const fetchFamilyGroups = useCallback(async () => {
+    try {
+      const res = await fetch('/api/family-groups');
+      if (!res.ok) return;
+      const data = await res.json();
+      setFamilyGroups(data.groups ?? []);
+    } catch (err) {
+      console.error('[ReceptionPage] fetchFamilyGroups:', err);
+    }
+  }, []);
+
+  const debouncedFetchQueue = useRef(debounce(() => { void fetchQueueData(); }, 300)).current;
+
   useEffect(() => {
-    if (!authed) return;
+    void fetchQueueData();
+    void fetchFamilyGroups();
 
-    fetchData();
+    if (!clinicId) return;
 
     const supabase = supabaseRef.current;
-    const channel  = supabase
+    const filter   = `clinic_id=eq.${clinicId}`;
+
+    const channel = supabase
       .channel('reception-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'patients' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clinic_settings' }, fetchData)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'patients', filter },
+        debouncedFetchQueue
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clinic_settings', filter },
+        debouncedFetchQueue
+      )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [authed, fetchData]);
+  }, [clinicId, debouncedFetchQueue, fetchQueueData, fetchFamilyGroups]);
 
-  // ── Action handlers ──────────────────────────────────────────
   const handleAction = async (patientId: string, action: string) => {
     if (actionLoading) return;
     setActionLoading(`${patientId}-${action}`);
@@ -128,19 +134,9 @@ export default function ReceptionPage() {
   const handlePatientAdded = (patient: Patient) => {
     setLastAdded(patient);
     setShowQR(true);
+    void fetchFamilyGroups();
+    void fetchQueueData();
   };
-
-  // ── Loading / auth screens ───────────────────────────────────
-  if (!authChecked) {
-    return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500
-                        rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!authed) return null; // redirect in progress
 
   const isPaused     = stats?.isPaused ?? false;
   const waitingCount = stats?.waitingCount ?? 0;
@@ -148,12 +144,10 @@ export default function ReceptionPage() {
   return (
     <div className="min-h-screen bg-slate-100">
 
-      {/* ── Header ─────────────────────────────────────────── */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-3.5
                         flex items-center justify-between gap-4">
 
-          {/* Brand */}
           <div className="flex items-center gap-3 shrink-0">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-700
                             flex items-center justify-center shadow-lg shadow-blue-500/25">
@@ -173,7 +167,6 @@ export default function ReceptionPage() {
             </div>
           </div>
 
-          {/* Error banner */}
           {callError && (
             <div className="flex-1 bg-red-50 border border-red-200 text-red-700
                             rounded-xl px-4 py-2 text-sm font-medium text-center">
@@ -181,9 +174,7 @@ export default function ReceptionPage() {
             </div>
           )}
 
-          {/* Controls */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* Live status pill */}
             <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5
                               rounded-full text-xs font-semibold border ${
               isPaused
@@ -196,7 +187,6 @@ export default function ReceptionPage() {
               {isPaused ? 'Paused' : 'Running'}
             </span>
 
-            {/* Pause / Resume */}
             <button
               onClick={handleTogglePause}
               disabled={actionLoading === 'toggle-pause'}
@@ -210,7 +200,6 @@ export default function ReceptionPage() {
               {isPaused ? '▶ Resume' : '⏸ Pause'}
             </button>
 
-            {/* Call Next */}
             <button
               onClick={handleCallNext}
               disabled={!!actionLoading || isPaused || waitingCount === 0}
@@ -226,7 +215,6 @@ export default function ReceptionPage() {
               Call Next
             </button>
 
-            {/* Sign Out */}
             <button
               onClick={handleSignOut}
               className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-400
@@ -238,10 +226,8 @@ export default function ReceptionPage() {
         </div>
       </header>
 
-      {/* ── Main ───────────────────────────────────────────── */}
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6 space-y-5">
 
-        {/* Pause Banner */}
         {isPaused && (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4
                           flex items-center gap-3">
@@ -271,7 +257,6 @@ export default function ReceptionPage() {
         </div>
       </main>
 
-      {/* QR Modal */}
       {showQR && lastAdded && (
         <QRModal
           patient={lastAdded}

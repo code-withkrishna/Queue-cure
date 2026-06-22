@@ -2,15 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireAuth } from '@/lib/supabase/auth';
 import { getClinicId } from '@/lib/clinic-id';
-import { generateTokenNumber, generateAccessCode } from '@/lib/token';
-import { classifyTriage } from '@/lib/triage';
+import { getTodayDate } from '@/lib/date';
+import { handleRouteError } from '@/lib/api-utils';
+import { scheduleTriageUpdate } from '@/lib/triage-worker';
+import { validateAddPatientPayload } from '@/lib/validation';
 import { AddPatientPayload } from '@/types';
 
-// GET — active patients for today scoped to this clinic
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
+    await requireAuth();
     const supabase = createClient();
-    const today    = new Date().toISOString().split('T')[0];
+    const today    = getTodayDate();
 
     const { data: patients, error } = await supabase
       .from('patients')
@@ -23,87 +27,47 @@ export async function GET() {
     if (error) throw error;
     return NextResponse.json({ patients: patients ?? [] });
   } catch (err) {
-    console.error('[GET /api/patients]', err);
-    return NextResponse.json({ error: 'Failed to fetch patients' }, { status: 500 });
+    return handleRouteError(err, '[GET /api/patients]');
   }
 }
 
-// POST — add patient: token generation + AI triage + insert
 export async function POST(req: NextRequest) {
   try {
     await requireAuth();
     const body: AddPatientPayload = await req.json();
-
-    if (!body.patient_name?.trim()) {
-      return NextResponse.json({ error: 'Patient name is required' }, { status: 400 });
-    }
+    const validated = validateAddPatientPayload(body);
 
     const supabase = createClient();
-    const today    = new Date().toISOString().split('T')[0];
+    const today    = getTodayDate();
+    const clinicId = getClinicId();
 
-    // ── 1. Get last token for today (scoped to clinic) ───────
-    const { data: lastPatient } = await supabase
-      .from('patients')
-      .select('token_number')
-      .eq('date_created', today)
-      .eq('clinic_id', getClinicId())
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const nextToken = generateTokenNumber(lastPatient?.token_number ?? null);
-
-    // ── 2. Unique QR access code ─────────────────────────────
-    let accessCode = generateAccessCode();
-    for (let i = 0; i < 10; i++) {
-      const { data: collision } = await supabase
-        .from('patients')
-        .select('id')
-        .eq('qr_access_code', accessCode)
-        .maybeSingle();
-      if (!collision) break;
-      accessCode = generateAccessCode();
-    }
-
-    // ── 3. AI Triage (non-blocking) ──────────────────────────
-    let aiPriority:     string | null = null;
-    let aiPriorityNote: string | null = null;
-
-    if (body.chief_complaint?.trim()) {
-      const triage   = await classifyTriage(body.chief_complaint.trim());
-      aiPriority     = triage.priority;
-      aiPriorityNote = triage.note;
-    }
-
-    // ── 4. Insert ────────────────────────────────────────────
-    const { data: patient, error: insertErr } = await supabase
-      .from('patients')
-      .insert({
-        token_number:     nextToken,
-        patient_name:     body.patient_name.trim(),
-        phone:            body.phone?.trim() || null,
-        family_group_id:  body.family_group_id || null,
-        clinic_id:        getClinicId(),
-        status:           'WAITING',
-        qr_access_code:   accessCode,
-        date_created:     today,
-        chief_complaint:  body.chief_complaint?.trim() || null,
-        ai_priority:      aiPriority,
-        ai_priority_note: aiPriorityNote,
-      })
-      .select('*, family_group:family_groups(*)')
-      .single();
+    const { data: patient, error: insertErr } = await supabase.rpc('create_patient_record', {
+      p_clinic_id:        clinicId,
+      p_today:            today,
+      p_patient_name:     validated.patient_name,
+      p_phone:            validated.phone ?? null,
+      p_family_group_id:  validated.family_group_id ?? null,
+      p_chief_complaint:  validated.chief_complaint ?? null,
+      p_ai_priority:      null,
+      p_ai_priority_note: null,
+    });
 
     if (insertErr) throw insertErr;
 
-    // ── 5. Audit ─────────────────────────────────────────────
-    await supabase
-      .from('queue_events')
-      .insert({ patient_id: patient.id, event_type: 'PATIENT_ADDED' });
+    if (validated.chief_complaint?.trim()) {
+      scheduleTriageUpdate(patient.id, validated.chief_complaint);
+    }
 
-    return NextResponse.json({ patient }, { status: 201 });
+    const { data: fullPatient, error: fetchErr } = await supabase
+      .from('patients')
+      .select('*, family_group:family_groups(*)')
+      .eq('id', patient.id)
+      .single();
+
+    if (fetchErr) throw fetchErr;
+
+    return NextResponse.json({ patient: fullPatient }, { status: 201 });
   } catch (err) {
-    console.error('[POST /api/patients]', err);
-    return NextResponse.json({ error: 'Failed to add patient' }, { status: 500 });
+    return handleRouteError(err, '[POST /api/patients]');
   }
 }

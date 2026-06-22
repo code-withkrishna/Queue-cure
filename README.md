@@ -189,7 +189,16 @@ npm install
 1. Create project at [supabase.com](https://supabase.com)
 2. SQL Editor → run `supabase/schema.sql`
 3. SQL Editor → run `supabase/migrations/001_ai_triage_multiclinic.sql`
-4. Copy the `clinic_id` UUID from the output of the migration
+4. SQL Editor → run `supabase/migrations/002_rls_hardening.sql`
+5. SQL Editor → run `supabase/migrations/003_multiclinic_settings.sql`
+6. SQL Editor → run `supabase/migrations/004_security_and_integrity.sql`
+7. **Important:** sync deployment config with your clinic UUID:
+   ```sql
+   UPDATE deployment_config
+   SET clinic_id = (SELECT id FROM clinics WHERE slug = 'default')
+   WHERE id = 1;
+   ```
+8. Copy the `clinic_id` UUID from migration 001 output
 
 ### 3. Environment Variables
 
@@ -269,7 +278,7 @@ supabase/
 
 - **Framework**: Next.js 14 (App Router)
 - **Database**: Supabase (PostgreSQL + Realtime CDC)
-- **AI**: Anthropic Groq LLaMA (medical triage)
+- **AI**: Groq LLaMA (medical triage)
 - **Auth**: Supabase Magic Link
 - **Styling**: Tailwind CSS + Syne + DM Sans
 - **QR Codes**: `qrcode` (client-side)

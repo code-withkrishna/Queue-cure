@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 export default function LoginPage() {
@@ -8,13 +8,16 @@ export default function LoginPage() {
   const [sent, setSent]       = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
 
   // Surface a failed code-exchange redirect from /auth/callback.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('error') === 'auth_failed') {
       setError('That login link expired or was already used. Please request a new one.');
+    }
+    if (params.get('error') === 'forbidden') {
+      setError('This email is not authorized for staff access. Contact your clinic admin.');
     }
   }, []);
 
@@ -23,7 +26,7 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
 
-    const { error: authErr } = await supabase.auth.signInWithOtp({
+    const { error: authErr } = await supabaseRef.current.auth.signInWithOtp({
       email: email.trim(),
       options: {
         // PKCE flow: the magic link must land on /auth/callback first

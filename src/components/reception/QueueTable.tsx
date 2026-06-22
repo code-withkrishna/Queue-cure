@@ -1,8 +1,18 @@
 'use client';
 
+import { useMemo } from 'react';
 import { Patient, PatientAction } from '@/types';
 import StatusBadge from '@/components/shared/StatusBadge';
 import { formatDistanceToNow } from 'date-fns';
+
+// ── Waited time (memoized per row) ───────────────────────────
+function WaitedCell({ createdAt }: { createdAt: string }) {
+  const label = useMemo(
+    () => formatDistanceToNow(new Date(createdAt), { addSuffix: true }),
+    [createdAt]
+  );
+  return <span className="text-xs text-slate-400">{label}</span>;
+}
 
 // ── Triage Priority Badge ────────────────────────────────────
 function TriageBadge({ priority, note }: { priority: string | null; note?: string | null }) {
@@ -166,9 +176,7 @@ export default function QueueTable({ patients, onAction, actionLoading, isLoadin
 
                   {/* Waited */}
                   <td className="px-5 py-3.5">
-                    <span className="text-xs text-slate-400">
-                      {formatDistanceToNow(new Date(p.created_at), { addSuffix: true })}
-                    </span>
+                    <WaitedCell createdAt={p.created_at} />
                   </td>
 
                   {/* Actions */}

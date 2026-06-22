@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { Patient, TriagePriority } from '@/types';
 
 interface Props {
@@ -107,7 +108,7 @@ export default function QRModal({ patient, onClose }: Props) {
         <div className="px-6 py-5 flex flex-col items-center gap-4">
           {qrUrl ? (
             <div className="p-3 border-2 border-slate-100 rounded-2xl">
-              <img src={qrUrl} alt="QR Code" width={180} height={180} />
+              <Image src={qrUrl} alt="QR Code" width={180} height={180} unoptimized />
             </div>
           ) : (
             <div className="w-[180px] h-[180px] bg-slate-100 rounded-2xl animate-pulse" />

@@ -1,14 +1,10 @@
 // ============================================================
 // Smart Wait-Time Engine
-// Never hardcoded — uses real consultation durations
 // ============================================================
 
 import { Patient } from '@/types';
+import { sortWaitingPatients } from '@/lib/priority';
 
-/**
- * Compute average consultation time from today's completed patients.
- * Falls back to defaultMinutes if no completions yet.
- */
 export function calculateAvgConsultationTime(
   patients: Patient[],
   defaultMinutes = 8
@@ -26,12 +22,9 @@ export function calculateAvgConsultationTime(
   }, 0);
 
   const avg = totalMinutes / completed.length;
-  return Math.max(1, Math.round(avg * 10) / 10); // min 1 min, 1 decimal
+  return Math.max(1, Math.round(avg * 10) / 10);
 }
 
-/**
- * Estimated wait = people ahead × average consultation time
- */
 export function calculateEstimatedWait(
   peopleAhead: number,
   avgConsultationMin: number
@@ -40,21 +33,14 @@ export function calculateEstimatedWait(
 }
 
 /**
- * How many WAITING patients are ahead of the target patient (FIFO).
- * Returns -1 if patient not found or not WAITING.
+ * WAITING patients ahead of target, using the same priority order as call-next.
  */
 export function getPeopleAhead(allPatients: Patient[], targetId: string): number {
-  const waiting = [...allPatients]
-    .filter((p) => p.status === 'WAITING')
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
+  const waiting = sortWaitingPatients(allPatients);
   const index = waiting.findIndex((p) => p.id === targetId);
-  return index; // 0 = next up (no one ahead), -1 = not in queue
+  return index;
 }
 
-/**
- * Longest single consultation in minutes from today.
- */
 export function getLongestConsultation(patients: Patient[]): number {
   const completed = patients.filter(
     (p) => p.status === 'COMPLETED' && p.called_at && p.completed_at

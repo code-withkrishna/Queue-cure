@@ -5,13 +5,14 @@ import './globals.css';
 const syne = Syne({
   subsets: ['latin'],
   variable: '--font-syne',
-  weight: ['400', '600', '700', '800'],
+  weight: ['700', '800'],
   display: 'swap',
 });
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
   variable: '--font-dm-sans',
+  weight: ['400', '600'],
   display: 'swap',
 });
 
@@ -24,7 +25,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${syne.variable} ${dmSans.variable}`}>
+    <html lang="en" className={`${syne.variable} ${dmSans.variable}`} data-scroll-behavior="smooth">
       <body className="font-dm antialiased">{children}</body>
     </html>
   );

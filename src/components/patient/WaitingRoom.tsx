@@ -2,61 +2,46 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Patient, QueueStats } from '@/types';
-import {
-  calculateAvgConsultationTime,
-  calculateEstimatedWait,
-  getPeopleAhead,
-} from '@/lib/wait-engine';
+import { getPublicClinicId } from '@/lib/clinic-id';
+import { debounce } from '@/lib/debounce';
+import { Patient } from '@/types';
 
 interface Props {
   accessCode: string;
 }
 
+interface WaitRoomData {
+  found: boolean;
+  patient?: Patient;
+  peopleAhead: number;
+  estimatedWait: number;
+  isPaused: boolean;
+  currentTokenNumber: string | null;
+  avgConsultationMinutes: number;
+}
+
 export default function WaitingRoom({ accessCode }: Props) {
-  const [patient, setPatient]         = useState<Patient | null>(null);
-  const [allPatients, setAllPatients] = useState<Patient[]>([]);
-  const [stats, setStats]             = useState<QueueStats | null>(null);
+  const [data, setData]               = useState<WaitRoomData | null>(null);
   const [loading, setLoading]         = useState(true);
   const [notFound, setNotFound]       = useState(false);
   const [connectionState, setConnectionState] =
     useState<'connected' | 'connecting' | 'error'>('connecting');
 
   const supabaseRef = useRef(createClient());
+  const clinicId    = getPublicClinicId();
 
   const fetchAll = useCallback(async () => {
-    const supabase = supabaseRef.current;
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const res = await fetch(`/api/wait-room/${encodeURIComponent(accessCode)}`);
+      if (res.status === 404) {
+        setNotFound(true);
+        return;
+      }
+      if (!res.ok) return;
 
-      // Fetch this patient by access code
-      const { data: p } = await supabase
-        .from('patients')
-        .select('*, family_group:family_groups(*)')
-        .eq('qr_access_code', accessCode)
-        .single();
-
-      if (!p) { setNotFound(true); setLoading(false); return; }
-      setPatient(p);
-
-      // BUG 2 FIX: scope by clinic_id so multi-clinic judging gives
-      // correct position numbers. NEXT_PUBLIC_ prefix makes this
-      // available in client components.
-      const clinicId = process.env.NEXT_PUBLIC_CLINIC_ID;
-
-      const allQuery = supabase
-        .from('patients')
-        .select('*')
-        .eq('date_created', today);
-
-      // Apply clinic filter only when the env var is configured
-      if (clinicId) allQuery.eq('clinic_id', clinicId);
-
-      const { data: all } = await allQuery;
-      setAllPatients(all ?? []);
-
-      const statsRes = await fetch('/api/stats');
-      if (statsRes.ok) setStats(await statsRes.json());
+      const payload = await res.json();
+      setData(payload);
+      setNotFound(false);
     } catch (err) {
       console.error('[WaitingRoom fetchAll]', err);
     } finally {
@@ -64,31 +49,46 @@ export default function WaitingRoom({ accessCode }: Props) {
     }
   }, [accessCode]);
 
+  const debouncedFetch = useRef(debounce(() => { void fetchAll(); }, 300)).current;
+
   useEffect(() => {
-    fetchAll();
+    void fetchAll();
+
+    if (!clinicId) return;
+
     const supabase = supabaseRef.current;
-    const channel  = supabase
+    const filter   = `clinic_id=eq.${clinicId}`;
+
+    const channel = supabase
       .channel('waiting-room-' + accessCode)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'patients' }, fetchAll)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clinic_settings' }, fetchAll)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'patients', filter },
+        debouncedFetch
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clinic_settings', filter },
+        debouncedFetch
+      )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED')                              setConnectionState('connected');
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setConnectionState('error');
         if (status === 'CLOSED')                                  setConnectionState('connecting');
       });
-    return () => { supabase.removeChannel(channel); };
-  }, [fetchAll, accessCode]);
 
-  // ── Derived values ──────────────────────────────────────────
-  const peopleAhead   = patient ? getPeopleAhead(allPatients, patient.id) : -1;
-  const avgConsult    = calculateAvgConsultationTime(allPatients, stats?.avgConsultationMinutes ?? 8);
-  const estimatedWait = peopleAhead >= 0 ? calculateEstimatedWait(peopleAhead, avgConsult) : 0;
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchAll, debouncedFetch, accessCode, clinicId]);
+
+  const patient       = data?.patient ?? null;
+  const peopleAhead   = data?.peopleAhead ?? -1;
+  const estimatedWait = data?.estimatedWait ?? 0;
 
   const isCalled    = patient?.status === 'CALLED';
   const isCompleted = patient?.status === 'COMPLETED';
   const isCancelled = patient?.status === 'CANCELLED';
   const isWaiting   = patient?.status === 'WAITING';
-  const isPaused    = stats?.isPaused ?? false;
+  const isPaused    = data?.isPaused ?? false;
 
   if (loading) {
     return (
@@ -118,7 +118,6 @@ export default function WaitingRoom({ accessCode }: Props) {
       : isCompleted ? 'bg-gradient-to-br from-slate-800 to-slate-600'
       :               'bg-gradient-to-br from-[#0F172A] to-[#1E3A5F]'}`}
     >
-      {/* Header */}
       <header className="px-6 pt-8 pb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
@@ -126,7 +125,6 @@ export default function WaitingRoom({ accessCode }: Props) {
           </div>
           <span className="text-white/80 text-sm font-semibold">Queue Cure</span>
         </div>
-        {/* Connection status */}
         <div className="flex items-center gap-1.5">
           {connectionState === 'connected'  && <><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /><span className="text-white/60 text-xs">Live</span></>}
           {connectionState === 'connecting' && <><span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" /><span className="text-amber-400/80 text-xs">Reconnecting...</span></>}
@@ -151,7 +149,6 @@ export default function WaitingRoom({ accessCode }: Props) {
           </div>
         )}
 
-        {/* Token Hero */}
         <div className={`w-full max-w-xs bg-white rounded-3xl shadow-2xl overflow-hidden
           ${isCalled ? 'ring-4 ring-emerald-400 ring-offset-4 ring-offset-emerald-800' : ''}`}>
           <div className="bg-gradient-to-br from-slate-50 to-blue-50 px-6 pt-6 pb-4">
@@ -168,7 +165,6 @@ export default function WaitingRoom({ accessCode }: Props) {
           </div>
         </div>
 
-        {/* AI triage badge */}
         {patient?.chief_complaint && patient?.ai_priority && (
           <div className={`w-full max-w-xs rounded-2xl px-4 py-3 border text-center text-sm ${
             patient.ai_priority === 'EMERGENCY' ? 'bg-red-500/20 border-red-400/30 text-red-200'
@@ -186,7 +182,6 @@ export default function WaitingRoom({ accessCode }: Props) {
           </div>
         )}
 
-        {/* Info Cards */}
         {!isCompleted && !isCancelled && (
           <div className="w-full max-w-xs space-y-3">
             <div className="bg-white/10 backdrop-blur-sm rounded-2xl px-5 py-4
@@ -196,7 +191,7 @@ export default function WaitingRoom({ accessCode }: Props) {
                 <p className="text-white/70 text-sm font-medium">Now Calling</p>
               </div>
               <p className="text-white font-black text-xl font-mono tracking-wider">
-                {stats?.currentToken?.token_number ?? '—'}
+                {data?.currentTokenNumber ?? '—'}
               </p>
             </div>
 

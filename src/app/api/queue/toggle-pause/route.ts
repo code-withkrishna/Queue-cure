@@ -2,26 +2,27 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireAuth } from '@/lib/supabase/auth';
 import { getClinicId } from '@/lib/clinic-id';
+import { handleRouteError } from '@/lib/api-utils';
+import { clinicSettingsFilter, fetchClinicSettings } from '@/lib/clinic-settings';
 
 export async function POST() {
   try {
     await requireAuth();
     const supabase = createClient();
+    const clinicId = getClinicId();
 
-    const { data: settings, error: fetchErr } = await supabase
-      .from('clinic_settings')
-      .select('queue_paused')
-      .eq('clinic_id', getClinicId())
-      .single();
+    const settings = await fetchClinicSettings(supabase, clinicId);
+    if (!settings) {
+      return NextResponse.json({ error: 'Clinic settings not found' }, { status: 404 });
+    }
 
-    if (fetchErr) throw fetchErr;
-
+    const filter = clinicSettingsFilter(clinicId, settings);
     const newPaused = !settings.queue_paused;
 
     const { data: updated, error: updateErr } = await supabase
       .from('clinic_settings')
       .update({ queue_paused: newPaused })
-      .eq('clinic_id', getClinicId())
+      .eq(filter.column, filter.value)
       .select()
       .single();
 
@@ -29,7 +30,6 @@ export async function POST() {
 
     return NextResponse.json({ queue_paused: updated.queue_paused });
   } catch (err) {
-    console.error('[POST /api/queue/toggle-pause]', err);
-    return NextResponse.json({ error: 'Failed to toggle queue' }, { status: 500 });
+    return handleRouteError(err, '[POST /api/queue/toggle-pause]');
   }
 }

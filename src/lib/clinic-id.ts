@@ -22,3 +22,8 @@ export function getClinicId(): string {
   }
   return id;
 }
+
+/** Client-safe clinic id for Realtime filters (empty string if unset). */
+export function getPublicClinicId(): string {
+  return process.env.NEXT_PUBLIC_CLINIC_ID ?? '';
+}

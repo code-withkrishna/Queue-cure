@@ -226,7 +226,7 @@ export default function AddPatientForm({ familyGroups, onPatientAdded }: Props) 
           {loading ? (
             <>
               <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              {complaint.trim() ? 'Triaging + Generating...' : 'Generating...'}
+              {complaint.trim() ? 'Generating token...' : 'Generating...'}
             </>
           ) : (
             <>
