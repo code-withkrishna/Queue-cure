@@ -4,8 +4,6 @@ import { requireAuth } from '@/lib/supabase/auth';
 import { getClinicId } from '@/lib/clinic-id';
 import { getTodayDate } from '@/lib/date';
 import { handleRouteError } from '@/lib/api-utils';
-import { fetchClinicSettings } from '@/lib/clinic-settings';
-import { buildQueueStats } from '@/lib/queue-stats';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,29 +14,16 @@ export async function GET() {
     const today    = getTodayDate();
     const clinicId = getClinicId();
 
-    const [patientsRes, settingsData, metricsRes] = await Promise.all([
-      supabase
-        .from('patients')
-        .select('*, family_group:family_groups(*)')
-        .eq('date_created', today)
-        .eq('clinic_id', clinicId)
-        .in('status', ['WAITING', 'CALLED'])
-        .order('created_at', { ascending: true }),
-      fetchClinicSettings(supabase, clinicId),
-      supabase
-        .from('patients')
-        .select('status, called_at, completed_at')
-        .eq('date_created', today)
-        .eq('clinic_id', clinicId),
-    ]);
-
-    if (patientsRes.error) throw patientsRes.error;
-    if (metricsRes.error) throw metricsRes.error;
-
-    return NextResponse.json({
-      patients: patientsRes.data ?? [],
-      stats:    buildQueueStats(settingsData, metricsRes.data ?? []),
+    // ⚡ Bolt Optimization: Use the single-round-trip RPC instead of 3 separate queries
+    // This reduces database load, network latency, and Node.js memory overhead
+    const { data, error } = await supabase.rpc('get_reception_snapshot', {
+      p_clinic_id: clinicId,
+      p_today:     today,
     });
+
+    if (error) throw error;
+
+    return NextResponse.json(data);
   } catch (err) {
     return handleRouteError(err, '[GET /api/reception/snapshot]');
   }
