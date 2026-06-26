@@ -4,8 +4,6 @@ import { requireAuth } from '@/lib/supabase/auth';
 import { getClinicId } from '@/lib/clinic-id';
 import { getTodayDate } from '@/lib/date';
 import { handleRouteError } from '@/lib/api-utils';
-import { fetchClinicSettings } from '@/lib/clinic-settings';
-import { buildQueueStats } from '@/lib/queue-stats';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -27,18 +25,18 @@ export async function GET(req: NextRequest) {
     const today    = getTodayDate();
     const clinicId = getClinicId();
 
-    const [settingsData, metricsRes] = await Promise.all([
-      fetchClinicSettings(supabase, clinicId),
-      supabase
-        .from('patients')
-        .select('status, called_at, completed_at')
-        .eq('date_created', today)
-        .eq('clinic_id', clinicId),
-    ]);
+    // ⚡ Bolt Optimization: Replace multiple Promise.all queries that transfer all patient rows
+    // to Node.js with a single PostgreSQL RPC call. This drastically reduces DB round-trips,
+    // network serialization latency, and Node memory footprint by performing aggregation directly
+    // in the database engine.
+    const { data, error } = await supabase.rpc('get_reception_snapshot', {
+      p_clinic_id: clinicId,
+      p_today:     today,
+    });
 
-    if (metricsRes.error) throw metricsRes.error;
+    if (error) throw error;
 
-    return NextResponse.json(buildQueueStats(settingsData, metricsRes.data ?? []));
+    return NextResponse.json(data?.stats ?? {});
   } catch (err) {
     return handleRouteError(err, '[GET /api/stats]');
   }
