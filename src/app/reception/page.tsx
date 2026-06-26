@@ -25,7 +25,7 @@ export default function ReceptionPage() {
 
   const fetchQueueData = useCallback(async () => {
     try {
-      const res = await fetch('/api/reception/snapshot');
+      const res = await fetch('/api/reception/snapshot', { cache: 'no-store' });
       if (res.status === 401) {
         window.location.href = '/login';
         return;
@@ -43,7 +43,7 @@ export default function ReceptionPage() {
 
   const fetchFamilyGroups = useCallback(async () => {
     try {
-      const res = await fetch('/api/family-groups');
+      const res = await fetch('/api/family-groups', { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       setFamilyGroups(data.groups ?? []);
