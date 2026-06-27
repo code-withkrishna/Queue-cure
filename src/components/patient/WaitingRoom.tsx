@@ -57,6 +57,7 @@ export default function WaitingRoom({ accessCode }: Props) {
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchAll();
 
     if (!clinicId) return;

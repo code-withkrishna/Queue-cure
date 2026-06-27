@@ -14,10 +14,10 @@ export default function LoginPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('error') === 'auth_failed') {
-      setError('That login link expired or was already used. Please request a new one.');
+      setTimeout(() => setError('That login link expired or was already used. Please request a new one.'), 0);
     }
     if (params.get('error') === 'forbidden') {
-      setError('This email is not authorized for staff access. Contact your clinic admin.');
+      setTimeout(() => setError('This email is not authorized for staff access. Contact your clinic admin.'), 0);
     }
   }, []);
 

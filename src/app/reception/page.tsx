@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSupabaseBrowserClient } from '@/lib/supabase/use-browser-client';
 import { getPublicClinicId } from '@/lib/clinic-id';
 import { debounce } from '@/lib/debounce';
@@ -52,9 +52,13 @@ export default function ReceptionPage() {
     }
   }, []);
 
-  const debouncedFetchQueue = useRef(debounce(() => { void fetchQueueData(); }, 300)).current;
+  const debouncedFetchQueue = useMemo(
+    () => debounce(() => { void fetchQueueData(); }, 300),
+    [fetchQueueData]
+  );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchQueueData();
     void fetchFamilyGroups();
 
