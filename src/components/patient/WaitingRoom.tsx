@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useSupabaseBrowserClient } from '@/lib/supabase/use-browser-client';
 import { getPublicClinicId } from '@/lib/clinic-id';
 import { debounce } from '@/lib/debounce';
 import { Patient } from '@/types';
@@ -27,12 +27,14 @@ export default function WaitingRoom({ accessCode }: Props) {
   const [connectionState, setConnectionState] =
     useState<'connected' | 'connecting' | 'error'>('connecting');
 
-  const supabaseRef = useRef(createClient());
+  const supabase = useSupabaseBrowserClient();
   const clinicId    = getPublicClinicId();
 
   const fetchAll = useCallback(async () => {
     try {
-      const res = await fetch(`/api/wait-room/${encodeURIComponent(accessCode)}`);
+      const res = await fetch(`/api/wait-room/${encodeURIComponent(accessCode)}`, {
+        cache: 'no-store',
+      });
       if (res.status === 404) {
         setNotFound(true);
         return;
@@ -49,14 +51,16 @@ export default function WaitingRoom({ accessCode }: Props) {
     }
   }, [accessCode]);
 
-  const debouncedFetch = useRef(debounce(() => { void fetchAll(); }, 300)).current;
+  const debouncedFetch = useMemo(
+    () => debounce(() => { void fetchAll(); }, 300),
+    [fetchAll]
+  );
 
   useEffect(() => {
     void fetchAll();
 
     if (!clinicId) return;
 
-    const supabase = supabaseRef.current;
     const filter   = `clinic_id=eq.${clinicId}`;
 
     const channel = supabase
@@ -78,7 +82,7 @@ export default function WaitingRoom({ accessCode }: Props) {
       });
 
     return () => { supabase.removeChannel(channel); };
-  }, [fetchAll, debouncedFetch, accessCode, clinicId]);
+  }, [fetchAll, debouncedFetch, accessCode, clinicId, supabase]);
 
   const patient       = data?.patient ?? null;
   const peopleAhead   = data?.peopleAhead ?? -1;

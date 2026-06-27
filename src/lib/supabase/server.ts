@@ -1,4 +1,5 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { requireEnv } from '@/lib/env';
 
 // ============================================================
 // Server-side Supabase client — SERVICE ROLE KEY
@@ -15,8 +16,8 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export function createClient() {
   return createSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder',
+    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    requireEnv('SUPABASE_SERVICE_ROLE_KEY'),
     {
       auth: {
         autoRefreshToken: false,

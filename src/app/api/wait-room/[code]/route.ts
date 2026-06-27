@@ -4,19 +4,9 @@ import { getClinicId } from '@/lib/clinic-id';
 import { getTodayDate } from '@/lib/date';
 import { handleRouteError } from '@/lib/api-utils';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
-import { calculateEstimatedWait } from '@/lib/wait-engine';
-import { Patient } from '@/types';
+import { fetchWaitRoomSnapshot } from '@/lib/wait-room-snapshot';
 
 export const dynamic = 'force-dynamic';
-
-interface WaitRoomSnapshot {
-  found: boolean;
-  patient?: Patient;
-  people_ahead?: number;
-  is_paused?: boolean;
-  current_token_number?: string | null;
-  avg_consultation_minutes?: number;
-}
 
 export async function GET(
   req: NextRequest,
@@ -30,7 +20,7 @@ export async function GET(
     }
 
     const ip = clientIp(req);
-    const limited = rateLimit(`wait-room:${ip}`, 60);
+    const limited = rateLimit(`wait-room:${ip}:${code.toUpperCase()}`, 60);
     if (!limited.ok) {
       return NextResponse.json(
         { error: 'Too many requests' },
@@ -42,33 +32,20 @@ export async function GET(
     const today    = getTodayDate();
     const clinicId = getClinicId();
 
-    const { data: snapshot, error } = await supabase.rpc('get_wait_room_snapshot', {
-      p_access_code: code,
-      p_clinic_id:   clinicId,
-      p_today:       today,
-    });
+    const snapshot = await fetchWaitRoomSnapshot(supabase, code, clinicId, today);
 
-    if (error) throw error;
-
-    const snap = snapshot as WaitRoomSnapshot;
-    if (!snap?.found) {
+    if (!snapshot.found) {
       return NextResponse.json({ found: false }, { status: 404 });
     }
 
-    const avgConsult = snap.avg_consultation_minutes ?? 8;
-    const peopleAhead   = snap.people_ahead ?? -1;
-    const estimatedWait = peopleAhead >= 0
-      ? calculateEstimatedWait(peopleAhead, avgConsult)
-      : 0;
-
     return NextResponse.json({
       found: true,
-      patient: snap.patient,
-      peopleAhead,
-      estimatedWait,
-      isPaused: snap.is_paused ?? false,
-      currentTokenNumber: snap.current_token_number ?? null,
-      avgConsultationMinutes: avgConsult,
+      patient: snapshot.patient,
+      peopleAhead: snapshot.peopleAhead,
+      estimatedWait: snapshot.estimatedWait,
+      isPaused: snapshot.isPaused,
+      currentTokenNumber: snapshot.currentTokenNumber,
+      avgConsultationMinutes: snapshot.avgConsultationMinutes,
     });
   } catch (err) {
     return handleRouteError(err, '[GET /api/wait-room/[code]]');

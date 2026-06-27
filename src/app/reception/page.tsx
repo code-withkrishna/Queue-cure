@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useSupabaseBrowserClient } from '@/lib/supabase/use-browser-client';
 import { getPublicClinicId } from '@/lib/clinic-id';
 import { debounce } from '@/lib/debounce';
 import { Patient, QueueStats, FamilyGroup } from '@/types';
@@ -20,7 +20,7 @@ export default function ReceptionPage() {
   const [showQR, setShowQR]             = useState(false);
   const [callError, setCallError]       = useState('');
 
-  const supabaseRef = useRef(createClient());
+  const supabase = useSupabaseBrowserClient();
   const clinicId    = getPublicClinicId();
 
   const fetchQueueData = useCallback(async () => {
@@ -60,7 +60,6 @@ export default function ReceptionPage() {
 
     if (!clinicId) return;
 
-    const supabase = supabaseRef.current;
     const filter   = `clinic_id=eq.${clinicId}`;
 
     const channel = supabase
@@ -78,7 +77,7 @@ export default function ReceptionPage() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [clinicId, debouncedFetchQueue, fetchQueueData, fetchFamilyGroups]);
+  }, [clinicId, debouncedFetchQueue, fetchQueueData, fetchFamilyGroups, supabase]);
 
   const handleAction = async (patientId: string, action: string) => {
     if (actionLoading) return;
@@ -127,7 +126,7 @@ export default function ReceptionPage() {
   };
 
   const handleSignOut = async () => {
-    await supabaseRef.current.auth.signOut();
+    await supabase.auth.signOut();
     window.location.href = '/login';
   };
 

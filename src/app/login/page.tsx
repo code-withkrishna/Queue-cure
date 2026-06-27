@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useState, useEffect } from 'react';
+import { useSupabaseBrowserClient } from '@/lib/supabase/use-browser-client';
 
 export default function LoginPage() {
   const [email, setEmail]     = useState('');
   const [sent, setSent]       = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
-  const supabaseRef = useRef(createClient());
+  const supabase = useSupabaseBrowserClient();
 
   // Surface a failed code-exchange redirect from /auth/callback.
   useEffect(() => {
@@ -26,7 +26,7 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
 
-    const { error: authErr } = await supabaseRef.current.auth.signInWithOtp({
+    const { error: authErr } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: {
         // PKCE flow: the magic link must land on /auth/callback first

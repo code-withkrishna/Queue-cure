@@ -4,9 +4,10 @@
 > Supabase CDC WebSocket → simultaneous sync across all screens in <200ms.  
 > No polling. No page refresh. No paper tokens.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?logo=vercel)](https://your-deploy.vercel.app)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?logo=vercel)](https://github.com/code-withkrishna/Queue-cure)
+<!-- ⚠️ Update the link above to your real Vercel URL after deploying (Setup step 8). -->
 [![Supabase](https://img.shields.io/badge/Realtime-Supabase%20CDC-green?logo=supabase)](https://supabase.com)
-[![Next.js](https://img.shields.io/badge/Framework-Next.js%2014-black?logo=next.js)](https://nextjs.org)
+[![Next.js](https://img.shields.io/badge/Framework-Next.js%2016-black?logo=next.js)](https://nextjs.org)
 [![AI Triage](https://img.shields.io/badge/AI-Groq%20LLaMA-orange)](https://groq.com)
 
 ---
@@ -57,7 +58,7 @@ propagates to their screen via Supabase Realtime CDC with no refresh required.
 │           │ fetch + PATCH                 │                    │
 │           ▼                               ▼                    │
 │  ┌──────────────────────────────────────────────────────┐      │
-│  │                Next.js 14 API Routes                 │      │
+│  │                Next.js 16 API Routes                 │      │
 │  │                                                      │      │
 │  │  POST /api/patients     → AI Triage → Insert         │      │
 │  │  PATCH /api/patients/[id]  (state machine)           │      │
@@ -179,12 +180,14 @@ WAITING ──► CANCELLED
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/your-username/queue-cure.git
-cd queue-cure
+git clone https://github.com/code-withkrishna/Queue-cure.git
+cd Queue-cure
 npm install
 ```
 
 ### 2. Supabase Setup
+
+Run these **in order** in the Supabase SQL Editor — all six are required, the app will not function correctly if any are skipped:
 
 1. Create project at [supabase.com](https://supabase.com)
 2. SQL Editor → run `supabase/schema.sql`
@@ -192,19 +195,50 @@ npm install
 4. SQL Editor → run `supabase/migrations/002_rls_hardening.sql`
 5. SQL Editor → run `supabase/migrations/003_multiclinic_settings.sql`
 6. SQL Editor → run `supabase/migrations/004_security_and_integrity.sql`
-7. **Important:** sync deployment config with your clinic UUID:
+7. SQL Editor → run `supabase/migrations/005_performance.sql`
+   **Required, not optional.** This migration defines `create_patient_record`,
+   `handle_patient_action`, and `get_reception_snapshot` with the exact
+   signatures the API routes call. Skipping it breaks Add Patient, Complete/
+   Skip/Cancel, and the entire Reception Dashboard with a
+   "function not found" error.
+8. **Important:** sync deployment config with your clinic UUID:
    ```sql
    UPDATE deployment_config
    SET clinic_id = (SELECT id FROM clinics WHERE slug = 'default')
    WHERE id = 1;
    ```
-8. Copy the `clinic_id` UUID from migration 001 output
+9. Copy the `clinic_id` UUID from migration 001 output
 
 ### 3. Environment Variables
 
 ```bash
 cp .env.example .env.local
-# Fill in: SUPABASE_URL, SUPABASE_ANON_KEY, CLINIC_ID, GROQ_API_KEY
+```
+
+Fill in **all five** of the following — these are the exact variable names
+`.env.example` expects (don't shorten them, the app reads these literal names):
+
+| Variable | Where to find it |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Dashboard → Settings → API → Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Dashboard → Settings → API → anon/public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Dashboard → Settings → API → service_role key — **server-only, never expose to the browser.** API routes use this to mutate data; the app will not work without it. |
+| `NEXT_PUBLIC_CLINIC_ID` | The UUID you copied in step 2.9 above |
+| `GROQ_API_KEY` | Free at [console.groq.com/keys](https://console.groq.com/keys) |
+
+If any of these is missing, the app now fails fast with a clear error naming
+the missing variable, instead of silently connecting to a placeholder and
+failing later with a confusing network error.
+
+**Strongly recommended for any real deployment** — without these, *any*
+email address that completes magic-link sign-in gets full staff access
+(add/complete/cancel patients, see names/phone numbers/chief complaints):
+
+```bash
+# Uncomment and set at least one of these in .env.local:
+STAFF_ALLOWED_EMAILS=reception@yourclinic.com,admin@yourclinic.com
+# or
+STAFF_EMAIL_DOMAINS=yourclinic.com
 ```
 
 ### 4. Enable Supabase Auth
@@ -215,20 +249,30 @@ Dashboard → Authentication → Providers → Email → Enable
 
 ```bash
 npm run dev   # http://localhost:3000
+npm test      # run the unit test suite (13 tests, ~2s)
 ```
 
-### 6. Deploy Edge Function (Optional)
+### 6. Health Check
+
+```
+GET /api/health
+```
+Returns `200 {"status":"ok"}` if the app can reach Supabase — useful for
+uptime monitoring (UptimeRobot, Vercel monitoring, etc.) after deploying.
+
+### 7. Deploy Edge Function (Optional)
 
 ```bash
 supabase functions deploy daily-reset
 # Then: Dashboard → Edge Functions → daily-reset → Schedule: 0 0 * * *
 ```
 
-### 7. Deploy to Vercel
+### 8. Deploy to Vercel
 
 ```bash
 npx vercel
-# Add all 4 env vars in Vercel dashboard
+# Add all 5 env vars from step 3 in the Vercel dashboard
+# (plus STAFF_ALLOWED_EMAILS / STAFF_EMAIL_DOMAINS if you set them)
 ```
 
 ---
@@ -248,7 +292,8 @@ src/
 │       ├── queue/call-next/         # FIFO call + race guard
 │       ├── queue/toggle-pause/      # Pause/resume
 │       ├── stats/route.ts           # Live metrics
-│       └── family-groups/           # Group management
+│       ├── family-groups/           # Group management
+│       └── health/route.ts          # Uptime check (GET /api/health)
 ├── components/
 │   ├── reception/
 │   │   ├── MetricsBar.tsx           # 4 live stat cards
@@ -269,6 +314,10 @@ src/
 supabase/
 ├── schema.sql                       # Base schema
 ├── migrations/001_ai_triage_multiclinic.sql
+├── migrations/002_rls_hardening.sql
+├── migrations/003_multiclinic_settings.sql
+├── migrations/004_security_and_integrity.sql
+├── migrations/005_performance.sql  # Required — RPCs the API routes call
 └── functions/daily-reset/index.ts  # Nightly reset
 ```
 
@@ -276,7 +325,7 @@ supabase/
 
 ## Tech Stack
 
-- **Framework**: Next.js 14 (App Router)
+- **Framework**: Next.js 16 (App Router, Turbopack)
 - **Database**: Supabase (PostgreSQL + Realtime CDC)
 - **AI**: Groq LLaMA (medical triage)
 - **Auth**: Supabase Magic Link

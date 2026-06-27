@@ -4,9 +4,8 @@ import { requireAuth } from '@/lib/supabase/auth';
 import { getClinicId } from '@/lib/clinic-id';
 import { getTodayDate } from '@/lib/date';
 import { handleRouteError } from '@/lib/api-utils';
-import { fetchClinicSettings } from '@/lib/clinic-settings';
-import { buildQueueStats } from '@/lib/queue-stats';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
+import { fetchReceptionSnapshot } from '@/lib/reception-snapshot';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,19 +25,9 @@ export async function GET(req: NextRequest) {
     const supabase = createClient();
     const today    = getTodayDate();
     const clinicId = getClinicId();
+    const snapshot = await fetchReceptionSnapshot(supabase, clinicId, today);
 
-    const [settingsData, metricsRes] = await Promise.all([
-      fetchClinicSettings(supabase, clinicId),
-      supabase
-        .from('patients')
-        .select('status, called_at, completed_at')
-        .eq('date_created', today)
-        .eq('clinic_id', clinicId),
-    ]);
-
-    if (metricsRes.error) throw metricsRes.error;
-
-    return NextResponse.json(buildQueueStats(settingsData, metricsRes.data ?? []));
+    return NextResponse.json(snapshot.stats);
   } catch (err) {
     return handleRouteError(err, '[GET /api/stats]');
   }
